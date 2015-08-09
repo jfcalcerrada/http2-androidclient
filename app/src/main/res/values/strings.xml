@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">HTTP2 Tester</string>
+    <string name="ametrics">https://ametrics.it.uc3m.es/start/android</string>
+    <string name="start">Start</string>
+</resources>
