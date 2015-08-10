@@ -66,10 +66,10 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
             JSONObject json = new JSONObject(response.body().string());
             JSONArray urls = json.getJSONArray("urls");
 
-            total = 4;urls.length();
-
+            total = urls.length();
             setMax(total * 2);
-            for (int i = 0; i < total; ++i) {
+
+            for (int i = 0; i < urls.length(); ++i) {
                 if (isCancelled())  {
                     activity.finish();
                     return null;
@@ -134,7 +134,7 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
             alertDialog.setTitle("Completed!");
             alertDialog.setMessage(
                     "Successful requests: "
-                            + "\nHTTP/1.1: " + results[0] + "/" + results[2]
+                            + "\nHTTP/1.1: "   + results[0] + "/" + results[2]
                             + "\nHTTP/2:     " + results[1] + "/" + results[2]
             );
 
@@ -190,7 +190,6 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
         } else if (mobile.isConnectedOrConnecting()) {
             return "Mobile";
         }
-
         return "No Network";
     }
 
