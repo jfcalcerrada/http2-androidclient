@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.net.ConnectivityManager;
 import android.os.AsyncTask;
+import android.telephony.CellLocation;
 import android.widget.*;
 
 import com.squareup.okhttp.MediaType;
@@ -22,10 +23,21 @@ import java.net.ConnectException;
 import java.net.URL;
 import java.util.Arrays;
 
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.util.Enumeration;
+import org.apache.http.conn.util.InetAddressUtils;
+
+import android.telephony.TelephonyManager;
+import android.telephony.gsm.GsmCellLocation;
+import android.telephony.cdma.CdmaCellLocation;
+
+
 /**
  * Created by José Fernando on 08/08/2015.
  */
-public class RequestsTask extends AsyncTask<String, Void, int[]> {
+public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
 
     private MainActivity activity;
 
@@ -34,6 +46,8 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
 
     private Exception error = null;
     private int progress    = 0;
+
+    private int[] results;
 
     public RequestsTask(MainActivity activity) {
         this.activity = activity;
@@ -45,8 +59,115 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
         http2Client.setProtocols(Arrays.asList(Protocol.HTTP_2));
     }
 
-    protected int[] doInBackground(String... uri) {
-        int[] results = new int[3];
+
+    protected JSONObject getExtraInfo()
+    {
+        JSONObject info = new JSONObject();
+
+        try {
+            TelephonyManager manager = (TelephonyManager)activity.getApplicationContext().getSystemService(Context.TELEPHONY_SERVICE);
+
+            info.put("ip", getMobileIP());
+            info.put("NetworkType", getNetworkTypeString(manager.getNetworkType()));
+            info.put("NetworkSubType", getNetworkSubTypeString(manager.getNetworkType()));
+
+            GsmCellLocation gsmloc = (GsmCellLocation)manager.getCellLocation();
+            if (gsmloc.getPsc() != -1) {
+                info.put("CellID", gsmloc.getCid());
+                info.put("CellLac", gsmloc.getLac());
+            } else {
+                info.put("CellID", gsmloc.getCid() & 0xffff);
+                info.put("CellLac", gsmloc.getLac() & 0xffff);
+            }
+
+            String operator = manager.getNetworkOperator();
+            info.put("NET-Operator", manager.getNetworkOperatorName());
+            info.put("NET-MCC", operator.substring(0, 3));
+            info.put("NET-MNC", operator.substring(3));
+
+            operator = manager.getSimOperator();
+            info.put("SIM-Operator", manager.getSimOperatorName());
+            info.put("SIM-MCC", operator.substring(0, 3));
+            info.put("SIM-MNC", operator.substring(3));
+
+
+        } catch (Exception e) { }
+
+        return info;
+    }
+
+    public String getNetworkTypeString(int networkType) {
+        switch (networkType) {
+            case TelephonyManager.NETWORK_TYPE_GPRS:
+            case TelephonyManager.NETWORK_TYPE_EDGE:
+            case TelephonyManager.NETWORK_TYPE_CDMA:
+            case TelephonyManager.NETWORK_TYPE_1xRTT:
+            case TelephonyManager.NETWORK_TYPE_IDEN:
+                return "2G";
+            case TelephonyManager.NETWORK_TYPE_UMTS:
+            case TelephonyManager.NETWORK_TYPE_EVDO_0:
+            case TelephonyManager.NETWORK_TYPE_EVDO_A:
+            case TelephonyManager.NETWORK_TYPE_HSDPA:
+            case TelephonyManager.NETWORK_TYPE_HSUPA:
+            case TelephonyManager.NETWORK_TYPE_HSPA:
+            case TelephonyManager.NETWORK_TYPE_EVDO_B:
+            case TelephonyManager.NETWORK_TYPE_EHRPD:
+            case TelephonyManager.NETWORK_TYPE_HSPAP:
+                return "3G";
+            case TelephonyManager.NETWORK_TYPE_LTE:
+                return "4G";
+            default:
+                return "Unknown";
+        }
+    }
+
+    public String getNetworkSubTypeString(int networkType) {
+        switch (networkType) {
+            case TelephonyManager.NETWORK_TYPE_CDMA:
+                return "CDMA";
+            case TelephonyManager.NETWORK_TYPE_EDGE:
+                return "EDGE";
+            case TelephonyManager.NETWORK_TYPE_GPRS:
+                return "GPRS";
+            case TelephonyManager.NETWORK_TYPE_HSDPA:
+                return "HSDPA";
+            case TelephonyManager.NETWORK_TYPE_HSPA:
+                return "HSPA";
+            case TelephonyManager.NETWORK_TYPE_HSPAP:
+                return "HSPA+";
+            case TelephonyManager.NETWORK_TYPE_LTE:
+                return "LTE";
+            case TelephonyManager.NETWORK_TYPE_UMTS:
+                return "UMTS";
+            case TelephonyManager.NETWORK_TYPE_UNKNOWN:
+            default:
+                return "Unknown";
+        }
+    }
+
+    /** Get IP For mobile */
+    public String getMobileIP() {
+        try {
+            for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements(); ) {
+                NetworkInterface intf = (NetworkInterface) en.nextElement();
+                for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements();) {
+                    InetAddress inetAddress = enumIpAddr.nextElement();
+                    if (!inetAddress.isLoopbackAddress()&& InetAddressUtils.isIPv4Address(inetAddress.getHostAddress())) {
+                        String ipaddress = inetAddress .getHostAddress().toString();
+                        return ipaddress;
+                    }
+                }
+            }
+        } catch (SocketException ex) {
+            log("Error getting the MobileIP" + ex.getMessage());
+        }
+
+        return null;
+    }
+
+
+    protected JSONObject doInBackground(String... uri) {
+        JSONObject json = null;
 
         this.error = null;
         resetProgress();
@@ -59,17 +180,19 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
             JSONObject testBody = new JSONObject();
 
             URL entry = new URL(uri[0]);
-            Request request = new Request.Builder().url(entry.toString()).build();
-            log("Getting urls to test from: " + entry.toString());
+            //Request request = new Request.Builder().url(entry.toString()).build();
 
-            Response response = http2Client.newCall(request).execute();
-            JSONObject json = new JSONObject(response.body().string());
-            JSONArray urls = json.getJSONArray("urls");
+            log("Getting urls to test from: " + entry.toString());
+            Response response = request(httpClient, entry, getExtraInfo().toString());
+
+            //Response response = http2Client.newCall(request).execute();
+            JSONObject endpoints = new JSONObject(response.body().string());
+            JSONArray urls = endpoints.getJSONArray("urls");
 
             total = urls.length();
             setMax(total * 2);
 
-            for (int i = 0; i < urls.length(); ++i) {
+            for (int i = 0; i < total; ++i) {
                 if (isCancelled())  {
                     activity.finish();
                     return null;
@@ -93,16 +216,16 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
                 updateProgress();
             }
 
-            URL finish = new URL(
-                    entry.getProtocol(),
-                    entry.getHost(),
-                    entry.getPort(),
-                    json.getString("finish")
-            );
+            URL finish = new URL(entry.getProtocol(), entry.getHost(),entry.getPort(),
+                    endpoints.getString("finish"));
 
+            response = request(httpClient, finish);
+            json = new JSONObject(response.body().string());
 
-
-            request(httpClient, finish, json.toString());
+            results = new int[3];
+            results[0] = http;
+            results[1] = h2;
+            results[2] = total;
 
         } catch (Exception e) {
             log("Error: " + e.getMessage());
@@ -110,17 +233,12 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
         }
 
         activity.finish();
-
-        results[0] = http;
-        results[1] = h2;
-        results[2] = total;
-
-        return results;
+        return json;
     }
 
 
     @Override
-    protected void onPostExecute(int[] results) {
+    protected void onPostExecute(JSONObject json) {
         AlertDialog alertDialog = new AlertDialog.Builder(activity).create();
         alertDialog.setButton(AlertDialog.BUTTON_NEUTRAL, "OK",
             new DialogInterface.OnClickListener() {
@@ -132,17 +250,25 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
 
         if (this.error == null) {
             alertDialog.setTitle("Completed!");
-            alertDialog.setMessage(
-                    "Successful requests: "
-                            + "\nHTTP/1.1: "   + results[0] + "/" + results[2]
+            alertDialog.setMessage("Successful requests: "
+                            + "\nHTTP/1.1: " + results[0] + "/" + results[2]
                             + "\nHTTP/2:     " + results[1] + "/" + results[2]
             );
+
+            try {
+                String code = json.getString("vcode");
+                if (code.length() > 0) {
+                    activity.setVCode(code);
+                }
+
+            } catch (Exception e) {
+                // TODO
+            }
 
         } else {
             alertDialog.setTitle("Error!");
             alertDialog.setMessage(this.error.getMessage());
         }
-
 
         alertDialog.show();
     }
@@ -180,7 +306,7 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
     }
 
     private String getNetwork() {
-        final ConnectivityManager connMgr = (ConnectivityManager) activity.getSystemService(Context.CONNECTIVITY_SERVICE);
+        final ConnectivityManager connMgr = (ConnectivityManager)activity.getSystemService(Context.CONNECTIVITY_SERVICE);
 
         final android.net.NetworkInfo wifi   = connMgr.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
         final android.net.NetworkInfo mobile = connMgr.getNetworkInfo(ConnectivityManager.TYPE_MOBILE);
@@ -194,8 +320,7 @@ public class RequestsTask extends AsyncTask<String, Void, int[]> {
     }
 
     private void log(String line) {
-        System.out.println(line);
-        activity.log(line);
+        //System.out.println(line);
     }
 
     private void resetProgress() {

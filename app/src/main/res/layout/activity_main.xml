@@ -11,6 +11,18 @@
         android:layout_height="match_parent">
 
         <EditText
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/campaignInput"
+            android:hint="Campaign ID" />
+
+        <EditText
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/workerInput"
+            android:hint="Worker ID" />
+
+        <EditText
             android:layout_width="fill_parent"
             android:layout_height="wrap_content"
             android:id="@+id/urlInput"
@@ -25,13 +37,6 @@
             android:layout_marginLeft="4dp"
             android:layout_marginRight="4dp" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="355dp"
-            android:id="@+id/log"
-            android:scrollbars = "vertical"
-            android:layout_weight="20" />
-
         <Button
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -39,5 +44,18 @@
             android:id="@+id/button"
             android:layout_gravity="right"
             android:onClick="start" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="?android:attr/textAppearanceMedium"
+            android:id="@+id/vcodeLabel" />
+
+        <EditText
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:id="@+id/vcodeOutput"
+            android:layout_gravity="right"
+            android:enabled="false" />
     </LinearLayout>
 </RelativeLayout>
