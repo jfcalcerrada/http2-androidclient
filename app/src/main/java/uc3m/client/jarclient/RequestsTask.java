@@ -4,8 +4,11 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.wifi.WifiManager;
 import android.os.AsyncTask;
 import android.telephony.CellLocation;
+import android.util.Log;
 import android.widget.*;
 
 import com.squareup.okhttp.MediaType;
@@ -31,7 +34,12 @@ import org.apache.http.conn.util.InetAddressUtils;
 
 import android.telephony.TelephonyManager;
 import android.telephony.gsm.GsmCellLocation;
-import android.telephony.cdma.CdmaCellLocation;
+
+import java.net.Socket;
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
 
 
 /**
@@ -47,7 +55,19 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
     private Exception error = null;
     private int progress    = 0;
 
-    private int[] results;
+    public static final String NETWORK_WIFI   = "WiFi";
+    public static final String NETWORK_MOBILE = "Mobile";
+    public static final String NETWORK_NONE   = "No Network";
+
+    private int[][] results;
+
+    private static final int RESULTS_HTTP1   = 0;
+    private static final int RESULTS_UPGRADE = 1;
+    private static final int RESULTS_HTTP2   = 2;
+
+    private static final int RESULTS_SUCCESS = 0;
+    private static final int RESULTS_TOTAL   = 1;
+
 
     public RequestsTask(MainActivity activity) {
         this.activity = activity;
@@ -57,6 +77,8 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
 
         httpClient.setProtocols(Arrays.asList(Protocol.HTTP_1_1));
         http2Client.setProtocols(Arrays.asList(Protocol.HTTP_2));
+
+        results = new int[3][2];
     }
 
 
@@ -166,66 +188,104 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
     }
 
 
+    protected JSONObject allTests(URL entry, String network) throws Exception {
+        JSONObject json;
+        resetProgress();
+
+
+
+        log("Getting urls to test from: " + entry.toString());
+
+        Response response;
+        if (getNetwork() == NETWORK_MOBILE) {
+            response = request(httpClient, entry, getExtraInfo().toString());
+        } else {
+            response = request(httpClient, entry);
+        }
+
+        JSONObject endpoints = new JSONObject(response.body().string());
+        JSONArray urls = endpoints.getJSONArray("urls");
+
+        int length = urls.length();
+        setMax(length);
+
+
+        URL url;
+        JSONObject testBody = (new JSONObject()).put("network", getNetwork());
+
+        for (int i = 0; i < length; ++i) {
+            if (isCancelled())  {
+                activity.finish();
+                return null;
+            }
+
+            if (!network.equals(getNetwork())) {
+                throw new Exception("WiFi <> Mobile network switch during the test");
+            }
+
+            url = new URL(urls.getString(i));
+
+            response = request(httpClient, url, testBody.toString());
+            results[RESULTS_HTTP1][RESULTS_TOTAL]++;
+            if (response != null) {
+                results[RESULTS_HTTP1][RESULTS_SUCCESS]++;
+            }
+
+            if ("http".equals(url.getProtocol())) {
+                results[RESULTS_UPGRADE][RESULTS_TOTAL]++;
+
+                if (upgrade(new URL(url.toString() + "/upgrade/" + getNetwork()))) {
+                    results[RESULTS_UPGRADE][RESULTS_SUCCESS]++;
+                }
+            }
+
+            response = request(http2Client, url, testBody.toString());
+            results[RESULTS_HTTP2][RESULTS_TOTAL]++;
+            if (response != null) {
+                results[RESULTS_HTTP2][RESULTS_SUCCESS]++;
+            }
+
+            updateProgress();
+        }
+
+        URL finish = new URL(entry.getProtocol(), entry.getHost(),entry.getPort(),
+                endpoints.getString("finish"));
+
+        response = request(httpClient, finish);
+        json = new JSONObject(response.body().string());
+
+        return json;
+    }
+
+
     protected JSONObject doInBackground(String... uri) {
         JSONObject json = null;
 
         this.error = null;
         resetProgress();
 
-        int http  = 0;
-        int h2    = 0;
-        int total = 0;
-
         try {
-            JSONObject testBody = new JSONObject();
+            log("Mobile start");
+            String network = getNetwork();
+            json = allTests(new URL(uri[0].replace("android", "android-" + network)), network);
+            log("Mobile finished");
 
-            URL entry = new URL(uri[0]);
-            //Request request = new Request.Builder().url(entry.toString()).build();
+            WifiManager wifiManager = (WifiManager) activity.getSystemService(Context.WIFI_SERVICE);
+            wifiManager.setWifiEnabled(true);
+            log("Before sleeps");
+            Thread.sleep(5000);
+            log("After sleeps");
 
-            log("Getting urls to test from: " + entry.toString());
-            Response response = request(httpClient, entry, getExtraInfo().toString());
+            ConnectivityManager cm = (ConnectivityManager) activity.getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo wifiNetwork = cm.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
 
-            //Response response = http2Client.newCall(request).execute();
-            JSONObject endpoints = new JSONObject(response.body().string());
-            JSONArray urls = endpoints.getJSONArray("urls");
-
-            total = urls.length();
-            setMax(total * 2);
-
-            for (int i = 0; i < total; ++i) {
-                if (isCancelled())  {
-                    activity.finish();
-                    return null;
-                }
-
-                URL url = new URL(urls.getString(i));
-
-                testBody.put("network", getNetwork());
-                response = request(httpClient, url, testBody.toString());
-                if (response != null) {
-                    http++;
-                }
-                updateProgress();
-
-                testBody.put("network", getNetwork());
-                response = request(http2Client, url, testBody.toString());
-                if (response != null) {
-                    h2++;
-                }
-
-                updateProgress();
+            log("Checking WiFi");
+            if (wifiManager.isWifiEnabled() && wifiNetwork.isConnected()) {
+                log("Internet start");
+                network = getNetwork();
+                json = allTests(new URL(uri[0].replace("android", "android-" + network)), network);
+                log("Internet finished");
             }
-
-            URL finish = new URL(entry.getProtocol(), entry.getHost(),entry.getPort(),
-                    endpoints.getString("finish"));
-
-            response = request(httpClient, finish);
-            json = new JSONObject(response.body().string());
-
-            results = new int[3];
-            results[0] = http;
-            results[1] = h2;
-            results[2] = total;
 
         } catch (Exception e) {
             log("Error: " + e.getMessage());
@@ -251,8 +311,12 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
         if (this.error == null) {
             alertDialog.setTitle("Completed!");
             alertDialog.setMessage("Successful requests: "
-                            + "\nHTTP/1.1: " + results[0] + "/" + results[2]
-                            + "\nHTTP/2:     " + results[1] + "/" + results[2]
+                + "\nHTTP/1.1: "   + results[RESULTS_HTTP1][RESULTS_SUCCESS]
+                             + "/" + results[RESULTS_HTTP1][RESULTS_TOTAL]
+                + "\nUpgrade:   "  + results[RESULTS_UPGRADE][RESULTS_SUCCESS]
+                             + "/" + results[RESULTS_UPGRADE][RESULTS_TOTAL]
+                + "\nHTTP/2:     " + results[RESULTS_HTTP2][RESULTS_SUCCESS]
+                             + "/" + results[RESULTS_HTTP2][RESULTS_TOTAL]
             );
 
             try {
@@ -266,7 +330,7 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
             }
 
         } else {
-            alertDialog.setTitle("Error!");
+            alertDialog.setTitle("Error:");
             alertDialog.setMessage(this.error.getMessage());
         }
 
@@ -305,26 +369,92 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
         return response;
     }
 
-    private String getNetwork() {
-        final ConnectivityManager connMgr = (ConnectivityManager)activity.getSystemService(Context.CONNECTIVITY_SERVICE);
+    private boolean upgrade(URL url) {
+        boolean upgraded = false;
 
-        final android.net.NetworkInfo wifi   = connMgr.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+        try {
+            Socket socket = new Socket(url.getHost(), url.getPort());
+
+            PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
+            DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+            writer.print("GET " + url.getPath() + " HTTP/1.1\r\n");
+            writer.print("Host: " + url.getHost() + "\r\n");
+            writer.print("Connection: Upgrade, HTTP2-Settings\r\n");
+            writer.print("Upgrade: h2c\r\n");
+            writer.print("HTTP2-Settings: AAMAAABkAAQAAP__\r\n");
+            writer.print("User-Agent: java-socket/1.0\r\n");
+            writer.print("\r\n");
+            writer.flush();
+
+
+            String line = reader.readLine();
+            log(line);
+
+            if (line.contains("101")) {
+                upgraded = true;
+
+                for (int i = 0; i < 6; i++) {
+                    log(reader.readLine());
+                }
+
+                writer.print("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+                dos.write(new byte[]{
+                        (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x04,
+                        (byte)0x01, (byte)0x00, (byte)0x00, (byte)0x00,
+                        (byte)0x00,
+                });
+                writer.flush();
+
+                while ((line = reader.readLine()) != null) {
+                    log(line);
+                }
+
+            } else {
+                upgraded = false;
+
+                while ((line = reader.readLine()) != null) {
+                    log(line);
+                }
+            }
+
+
+            socket.close();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return upgraded;
+    }
+
+    private String getNetwork() {
+        String network = NETWORK_NONE;
+
+        final ConnectivityManager connMgr = (ConnectivityManager) activity.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        final android.net.NetworkInfo wifi = connMgr.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
         final android.net.NetworkInfo mobile = connMgr.getNetworkInfo(ConnectivityManager.TYPE_MOBILE);
 
         if (wifi.isConnectedOrConnecting()) {
-            return "Wifi";
+            network = NETWORK_WIFI;
         } else if (mobile.isConnectedOrConnecting()) {
-            return "Mobile";
+            network = NETWORK_MOBILE;
         }
-        return "No Network";
+
+        return network;
     }
 
     private void log(String line) {
+        //Log.d("app", line);
         //System.out.println(line);
     }
 
     private void resetProgress() {
         progress = 0;
+        activity.setProgressBarIndeterminate(true);
     }
 
     private void updateProgress() {

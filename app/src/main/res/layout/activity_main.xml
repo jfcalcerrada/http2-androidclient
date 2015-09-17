@@ -27,7 +27,8 @@
             android:layout_height="wrap_content"
             android:id="@+id/urlInput"
             android:text="@string/ametrics"
-            android:inputType="textUri" />
+            android:inputType="textUri"
+            android:focusable="false" />
 
         <ProgressBar
             android:layout_width="fill_parent"

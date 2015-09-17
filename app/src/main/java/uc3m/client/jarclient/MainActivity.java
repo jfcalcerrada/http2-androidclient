@@ -23,6 +23,9 @@ public class MainActivity extends Activity {
 
     private RequestsTask task;
 
+    private Boolean mobile = false;
+    private Boolean wifi   = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -49,7 +52,7 @@ public class MainActivity extends Activity {
     }
 
     public void start(View x) {
-        if ("WiFi".equals(getNetwork())) {
+        if (!"Mobile".equals(getNetwork())) {
             AlertDialog alertDialog = new AlertDialog.Builder(this).create();
             alertDialog.setButton(AlertDialog.BUTTON_NEUTRAL, "OK",
                     new DialogInterface.OnClickListener() {
@@ -59,7 +62,7 @@ public class MainActivity extends Activity {
                     }
             );
             alertDialog.setTitle("Warning");
-            alertDialog.setMessage("Please, disable the WiFi");
+            alertDialog.setMessage("For the first test, please disable the WiFi");
             alertDialog.show();
             return;
         }
@@ -107,7 +110,7 @@ public class MainActivity extends Activity {
 
         task = new RequestsTask(this);
 
-        String url = input.getText().toString();
+        String url = input.getText().toString().trim();
         if (url.endsWith("/") == false) {
             url += "/";
         }
@@ -116,18 +119,20 @@ public class MainActivity extends Activity {
     }
 
     private String getNetwork() {
+        String network = RequestsTask.NETWORK_NONE;
+
         final ConnectivityManager connMgr = (ConnectivityManager) this.getSystemService(Context.CONNECTIVITY_SERVICE);
 
-        final android.net.NetworkInfo wifi   = connMgr.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
+        final android.net.NetworkInfo wifi = connMgr.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
         final android.net.NetworkInfo mobile = connMgr.getNetworkInfo(ConnectivityManager.TYPE_MOBILE);
 
         if (wifi.isConnectedOrConnecting()) {
-            return "WiFi";
+            network = RequestsTask.NETWORK_WIFI;
         } else if (mobile.isConnectedOrConnecting()) {
-            return "Mobile";
+            network = RequestsTask.NETWORK_MOBILE;
         }
 
-        return "No Network";
+        return network;
     }
 
 
