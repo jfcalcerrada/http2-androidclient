@@ -515,14 +515,14 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
             DatagramPacket request = new DatagramPacket(m, message.length(), host, url.getPort());
             socket.send(request);
 
-            byte[] buffer = new byte[1000];
-            DatagramPacket reply = new DatagramPacket(buffer, buffer.length);
-            socket.setSoTimeout(2000);
-            socket.receive(reply);
+            //byte[] buffer = new byte[1000];
+            //DatagramPacket reply = new DatagramPacket(buffer, buffer.length);
+            //socket.setSoTimeout(2000);
+            //socket.receive(reply);
 
-            String data = reply.getData().toString();
-            successful = (data.contains(token)) ? true : false;
-
+            //String data = reply.getData().toString();
+            //successful = (data.contains(token)) ? true : false;
+            successful = true;
             socket.close();
 
         } catch(SocketTimeoutException e){
