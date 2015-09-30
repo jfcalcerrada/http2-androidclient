@@ -23,6 +23,9 @@ import org.json.JSONObject;
 
 import java.io.IOException;
 import java.net.ConnectException;
+import java.net.DatagramPacket;
+import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.net.URL;
 import java.util.Arrays;
 
@@ -35,6 +38,7 @@ import org.apache.http.conn.util.InetAddressUtils;
 import android.telephony.TelephonyManager;
 import android.telephony.gsm.GsmCellLocation;
 
+import java.net.DatagramSocket;
 import java.net.Socket;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
@@ -64,6 +68,8 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
     private static final int RESULTS_HTTP1   = 0;
     private static final int RESULTS_UPGRADE = 1;
     private static final int RESULTS_HTTP2   = 2;
+    private static final int RESULTS_TCP     = 3;
+    private static final int RESULTS_UDP     = 4;
 
     private static final int RESULTS_SUCCESS = 0;
     private static final int RESULTS_TOTAL   = 1;
@@ -78,7 +84,7 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
         httpClient.setProtocols(Arrays.asList(Protocol.HTTP_1_1));
         http2Client.setProtocols(Arrays.asList(Protocol.HTTP_2));
 
-        results = new int[3][2];
+        results = new int[5][2];
     }
 
 
@@ -204,12 +210,15 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
         }
 
         JSONObject endpoints = new JSONObject(response.body().string());
+
+        String token   = endpoints.getString("token");
         JSONArray urls = endpoints.getJSONArray("urls");
 
         int length = urls.length();
         setMax(length);
 
 
+        URI uri;
         URL url;
         JSONObject testBody = (new JSONObject()).put("network", getNetwork());
 
@@ -223,26 +232,43 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
                 throw new Exception("WiFi <> Mobile network switch during the test");
             }
 
-            url = new URL(urls.getString(i));
+            uri = new URI(urls.getString(i));
 
-            response = request(httpClient, url, testBody.toString());
-            results[RESULTS_HTTP1][RESULTS_TOTAL]++;
-            if (response != null) {
-                results[RESULTS_HTTP1][RESULTS_SUCCESS]++;
-            }
+            if ("http".equals(uri.getScheme()) || "http2".equals(uri.getScheme()) ) {
+                url = new URL(uri.toString());
 
-            if ("http".equals(url.getProtocol())) {
-                results[RESULTS_UPGRADE][RESULTS_TOTAL]++;
-
-                if (upgrade(new URL(url.toString() + "/upgrade/" + getNetwork()))) {
-                    results[RESULTS_UPGRADE][RESULTS_SUCCESS]++;
+                response = request(httpClient, url, testBody.toString());
+                results[RESULTS_HTTP1][RESULTS_TOTAL]++;
+                if (response != null) {
+                    results[RESULTS_HTTP1][RESULTS_SUCCESS]++;
                 }
-            }
 
-            response = request(http2Client, url, testBody.toString());
-            results[RESULTS_HTTP2][RESULTS_TOTAL]++;
-            if (response != null) {
-                results[RESULTS_HTTP2][RESULTS_SUCCESS]++;
+                if ("http".equals(url.getProtocol())) {
+                    results[RESULTS_UPGRADE][RESULTS_TOTAL]++;
+
+                    if (upgrade(new URL(url.toString() + "/upgrade/" + getNetwork()))) {
+                        results[RESULTS_UPGRADE][RESULTS_SUCCESS]++;
+                    }
+                }
+
+                response = request(http2Client, url, testBody.toString());
+                results[RESULTS_HTTP2][RESULTS_TOTAL]++;
+                if (response != null) {
+                    results[RESULTS_HTTP2][RESULTS_SUCCESS]++;
+                }
+
+            } else if ("tcp".equals(uri.getScheme()) ) {
+                results[RESULTS_TCP][RESULTS_TOTAL]++;
+                if (tcpRequest(uri, token, getNetwork())) {
+                    results[RESULTS_TCP][RESULTS_SUCCESS]++;
+                }
+
+            } else if ("udp".equals(uri.getScheme())) {
+                results[RESULTS_UDP][RESULTS_TOTAL]++;
+                if (udpRequest(uri, token, getNetwork())) {
+                    results[RESULTS_UDP][RESULTS_SUCCESS]++;
+                }
+
             }
 
             updateProgress();
@@ -317,6 +343,10 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
                              + "/" + results[RESULTS_UPGRADE][RESULTS_TOTAL]
                 + "\nHTTP/2:     " + results[RESULTS_HTTP2][RESULTS_SUCCESS]
                              + "/" + results[RESULTS_HTTP2][RESULTS_TOTAL]
+                + "\nTCP:     " + results[RESULTS_TCP][RESULTS_SUCCESS]
+                             + "/" + results[RESULTS_TCP][RESULTS_TOTAL]
+                + "\nUDP:     " + results[RESULTS_UDP][RESULTS_SUCCESS]
+                             + "/" + results[RESULTS_UDP][RESULTS_TOTAL]
             );
 
             try {
@@ -429,6 +459,85 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
 
         return upgraded;
     }
+
+
+    private boolean tcpRequest(URI url, String token, String network) {
+        boolean successful = false;
+
+        try {
+            Socket socket = new Socket(url.getHost(), url.getPort());
+
+            PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
+            //DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+            String message = token;
+            if (!network.equals("")) {
+                message += ":" + network;
+            }
+
+            writer.println(message);
+            writer.flush();
+
+            String line = reader.readLine();
+            log(line);
+
+            successful = (line.contains(token)) ? true : false;
+
+            while ((line = reader.readLine()) != null) {
+                log(line);
+            }
+            socket.close();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return successful;
+    }
+
+    private boolean udpRequest(URI url, String token, String network) {
+        boolean successful = false;
+
+        DatagramSocket socket = null;
+        try{
+            String message = token;
+            if (!network.equals("")) {
+                message += ":" + network;
+            }
+
+
+            socket  = new DatagramSocket();
+            byte[]m = message.getBytes();
+
+            InetAddress host = InetAddress.getByName(url.getHost());
+            DatagramPacket request = new DatagramPacket(m, message.length(), host, url.getPort());
+            socket.send(request);
+
+            byte[] buffer = new byte[1000];
+            DatagramPacket reply = new DatagramPacket(buffer, buffer.length);
+            socket.setSoTimeout(2000);
+            socket.receive(reply);
+
+            String data = reply.getData().toString();
+            successful = (data.contains(token)) ? true : false;
+
+            socket.close();
+
+        } catch(SocketTimeoutException e){
+            e.printStackTrace();
+        } catch(Exception e){
+            e.printStackTrace();
+        } finally{
+            if (socket != null) {
+                socket.close();
+            }
+        }
+
+        return successful;
+    }
+
 
     private String getNetwork() {
         String network = NETWORK_NONE;
