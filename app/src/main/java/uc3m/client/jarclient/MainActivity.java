@@ -43,6 +43,21 @@ public class MainActivity extends Activity {
         vcodeLabel  = (TextView)findViewById(R.id.vcodeLabel);
 
         vcode.setEnabled(false);
+
+
+        AlertDialog alertDialog = new AlertDialog.Builder(this).create();
+        alertDialog.setButton(AlertDialog.BUTTON_NEUTRAL, "OK",
+                new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        dialog.dismiss();
+                    }
+                }
+        );
+        alertDialog.setTitle("Information");
+        alertDialog.setMessage("The test will last between 4-10 minutes.\n"
+                + "Please, do not close the app until it is done.\n"
+                + "For the first test, please disable the WiFi.");
+        alertDialog.show();
     }
 
     public void onBackPressed() {
