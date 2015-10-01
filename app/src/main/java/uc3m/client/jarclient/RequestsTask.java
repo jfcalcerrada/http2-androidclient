@@ -234,7 +234,7 @@ public class RequestsTask extends AsyncTask<String, Void, JSONObject> {
 
             uri = new URI(urls.getString(i));
 
-            if ("http".equals(uri.getScheme()) || "http2".equals(uri.getScheme()) ) {
+            if ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) {
                 url = new URL(uri.toString());
 
                 response = request(httpClient, url, testBody.toString());
